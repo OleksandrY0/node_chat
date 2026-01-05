@@ -1,57 +1,82 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { MessageForm } from "./MessageForm.jsx";
-import { MessageList } from "./MessageList.jsx";
+import { MessageForm } from "./components/MessageForm.jsx";
+import { MessageList } from "./components/MessageList.jsx";
 import axios from "axios";
 
-const API = "http://localhost:3005";
+export const API = "http://localhost:3005";
 
 export function App() {
+  const [authorName, setAuthorName] = useState(localStorage.getItem("authorName") || "");
+  const [localName, setLocalName] = useState(localStorage.getItem("authorName") || "");
+  const [roomName, setRoomName] = useState("");
+  const [currentRoomId, setCurrentRoomId] = useState("");
   const [rooms, setRooms] = useState([]);
-  const [currentRoomId, setCurrentRoomId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [newRoomName, setNewRoomName] = useState("");
-  const [deletedRoom, setDeletedRoom] = useState(null);
 
-  // Завантажуємо список кімнат
-  const fetchRooms = async () => {
-    try {
-      const res = await axios.get(`${API}/rooms`);
-      setRooms(res.data);
-
-      if (!currentRoomId && res.data.length > 0) {
-        setCurrentRoomId(res.data[0].id); // вибираємо першу кімнату
+  // Завантаження всіх кімнат при старті
+  useEffect(() => {
+    const fetchRooms = async () => {
+      try {
+        const res = await axios.get(`${API}/rooms`);
+        setRooms(res.data);
+      } catch (err) {
+        console.error("Failed to fetch rooms:", err);
+        setRooms([]);
       }
-    } catch (e) {
-      console.error("Failed to fetch rooms:", e);
-    }
+    };
+    fetchRooms();
+  }, []);
+
+  const saveAuthorName = () => {
+    if (!localName) return;
+    localStorage.setItem("authorName", localName);
+    setAuthorName(localName);
   };
 
-  // Завантажуємо повідомлення для обраної кімнати
-  const fetchMessages = async (roomId) => {
+  const joinOrCreateRoom = async () => {
+    if (!roomName) return;
+
+    const existingRoom = rooms.find((r) => r.name === roomName);
+    let roomId;
+
+    if (existingRoom) {
+      roomId = existingRoom.id;
+    } else {
+      try {
+        const res = await axios.post(`${API}/rooms`, { name: roomName });
+        roomId = res.data.id;
+        setRooms((prev) => [...prev, res.data]);
+      } catch (err) {
+        console.error("Failed to create room:", err);
+        alert("Failed to create room");
+        return;
+      }
+    }
+
+    setCurrentRoomId(roomId);
+    setRoomName("");
+
+    // Завантажуємо історію повідомлень для цієї кімнати
     try {
       const res = await axios.get(`${API}/rooms/${roomId}/messages`);
-      setMessages(res.data.reverse());
-    } catch (e) {
-      console.error("Failed to fetch messages:", e);
+      setMessages(res.data);
+    } catch (err) {
+      console.error("Failed to fetch messages:", err);
       setMessages([]);
     }
   };
 
-  const saveMessage = (msg) => {
-    setMessages((prev) => [msg, ...prev]);
-  };
-
-  // SSE для поточної кімнати
+  // SSE для нових повідомлень
   useEffect(() => {
     if (!currentRoomId) return;
 
     const eventSource = new EventSource(`${API}/events?roomId=${currentRoomId}`);
 
     eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "new-message") {
-        saveMessage(data.payload);
+      const parsed = JSON.parse(event.data);
+      if (parsed.type === "new-message") {
+        setMessages((prev) => [...prev, parsed.payload]); // додаємо нове повідомлення в кінець
       }
     };
 
@@ -63,135 +88,60 @@ export function App() {
     return () => eventSource.close();
   }, [currentRoomId]);
 
-  // Завантажуємо кімнати при старті
-  useEffect(() => {
-    fetchRooms();
-  }, []);
-
-  // Завантажуємо повідомлення при зміні кімнати
-  useEffect(() => {
-    if (currentRoomId) {
-      fetchMessages(currentRoomId);
-      setDeletedRoom(null);
-    }
-  }, [currentRoomId]);
-
-  // Створення кімнати
-  const createRoom = async () => {
-    if (!newRoomName) return;
-    try {
-      const res = await axios.post(`${API}/rooms`, { name: newRoomName });
-      setCurrentRoomId(res.data.id);
-      setNewRoomName("");
-      fetchRooms();
-    } catch (e) {
-      alert("Failed to create room");
-    }
-  };
-
-  // Видалення кімнати
-  const deleteRoom = async (id) => {
-    try {
-      await axios.delete(`${API}/rooms/${id}`);
-      if (currentRoomId === id) setCurrentRoomId(null);
-      setDeletedRoom(id);
-      fetchRooms();
-    } catch (e) {
-      console.error("Failed to delete room:", e);
-    }
-  };
-
-  // Перейменування кімнати
-  const renameRoom = async (id, oldName) => {
-    const newName = prompt("Enter new room name", oldName);
-    if (!newName || newName === oldName) return;
-
-    try {
-      await axios.patch(`${API}/rooms/${id}`, { name: newName });
-      fetchRooms();
-    } catch (e) {
-      alert("Failed to rename room");
-    }
-  };
-
   return (
-    <section className="section">
-      <div className="container">
-        <h2 className="title is-4">Rooms</h2>
+    <section className="section content">
+      {!authorName && (
+        <section className="section name">
+          <input
+            className="input"
+            placeholder="Enter your name"
+            value={localName}
+            onChange={(e) => setLocalName(e.target.value)}
+          />
+          <button className="button" onClick={saveAuthorName}>
+            Save
+          </button>
+        </section>
+      )}
 
-        {rooms.length === 0 ? (
-          <p className="notification is-warning is-light">
-            No rooms yet. Create one below 👇
-          </p>
-        ) : (
-          <ul className="box">
-            {rooms.map((room) => (
-              <li key={room.id} className="level is-mobile">
-                <div className="level-left">
-                  <button
-                    className={`button is-small mr-2 ${
-                      room.id === currentRoomId ? "is-link is-light" : "is-light"
-                    }`}
-                    onClick={() => {
-                      setDeletedRoom(null);
-                      setCurrentRoomId(room.id);
-                    }}
+      {authorName && !currentRoomId && (
+        <section className="section room">
+          <input
+            className="input"
+            placeholder="Enter room name"
+            value={roomName}
+            onChange={(e) => setRoomName(e.target.value)}
+          />
+          <button className="button" onClick={joinOrCreateRoom}>
+            Join / Create room
+          </button>
+
+          {rooms.length > 0 && (
+            <div className="room-list">
+              <p>Existing rooms:</p>
+              <ul>
+                {rooms.map((r) => (
+                  <li
+                    key={r.id}
+                    style={{ cursor: "pointer", color: "blue" }}
+                    onClick={() => setRoomName(r.name)}
                   >
-                    {room.name}
-                  </button>
-                </div>
-                <div className="level-right">
-                  <button
-                    className="button is-small is-info mr-2"
-                    onClick={() => renameRoom(room.id, room.name)}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    className="button is-small is-danger"
-                    onClick={() => deleteRoom(room.id)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+                    {r.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
-        <div className="field has-addons mt-4">
-          <div className="control is-expanded">
-            <input
-              className="input"
-              type="text"
-              placeholder="New room name"
-              value={newRoomName}
-              onChange={(e) => setNewRoomName(e.target.value)}
-            />
-          </div>
-          <div className="control">
-            <button className="button is-primary" onClick={createRoom}>
-              Create Room
-            </button>
-          </div>
-        </div>
-
-        {deletedRoom && (
-          <div className="notification is-danger is-light mt-4">
-            Room deleted. Pick another room or create a new one.
-          </div>
-        )}
-
-        {currentRoomId && (
-          <>
-            <h1 className="title mt-6">Chat: {rooms.find(r => r.id === currentRoomId)?.name}</h1>
-
-            <MessageForm roomId={currentRoomId} />
-
-            <MessageList messages={messages} />
-          </>
-        )}
-      </div>
+      {authorName && currentRoomId && (
+        <>
+          <h1 className="title">Chat: {rooms.find((r) => r.id === currentRoomId)?.name}</h1>
+          <MessageForm authorName={authorName} roomId={currentRoomId} />
+          <MessageList messages={messages} />
+        </>
+      )}
     </section>
   );
 }
