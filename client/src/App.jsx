@@ -1,20 +1,29 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
 import "./App.css";
 import { MessageForm } from "./components/MessageForm.jsx";
 import { MessageList } from "./components/MessageList.jsx";
-import axios from "axios";
 
 export const API = "http://localhost:3005";
 
 export function App() {
-  const [authorName, setAuthorName] = useState(localStorage.getItem("authorName") || "");
-  const [localName, setLocalName] = useState(localStorage.getItem("authorName") || "");
-  const [roomName, setRoomName] = useState("");
-  const [currentRoomId, setCurrentRoomId] = useState("");
-  const [rooms, setRooms] = useState([]);
-  const [messages, setMessages] = useState([]);
+  // ---------------------------
+  // State variables
+  // ---------------------------
+  const [authorName, setAuthorName] = useState(
+    localStorage.getItem("authorName") || ""
+  ); // Current user name
+  const [localName, setLocalName] = useState(
+    localStorage.getItem("authorName") || ""
+  ); // Temporary input before saving
+  const [roomName, setRoomName] = useState(""); // Input for joining/creating a room
+  const [currentRoomId, setCurrentRoomId] = useState(""); // Active room ID
+  const [rooms, setRooms] = useState([]); // List of rooms
+  const [messages, setMessages] = useState([]); // Messages in current room
 
-  // Завантаження всіх кімнат при старті
+  // ---------------------------
+  // Fetch all rooms on startup
+  // ---------------------------
   useEffect(() => {
     const fetchRooms = async () => {
       try {
@@ -22,52 +31,67 @@ export function App() {
         setRooms(res.data);
       } catch (err) {
         console.error("Failed to fetch rooms:", err);
-        setRooms([]);
       }
     };
     fetchRooms();
   }, []);
 
+  // ---------------------------
+  // Save author name
+  // ---------------------------
   const saveAuthorName = () => {
     if (!localName) return;
     localStorage.setItem("authorName", localName);
     setAuthorName(localName);
   };
 
+  // ---------------------------
+  // Join an existing room or create a new one
+  // ---------------------------
   const joinOrCreateRoom = async () => {
     if (!roomName) return;
 
+    // Check if room already exists
     const existingRoom = rooms.find((r) => r.name === roomName);
-    let roomId;
-
     if (existingRoom) {
-      roomId = existingRoom.id;
-    } else {
-      try {
-        const res = await axios.post(`${API}/rooms`, { name: roomName });
-        roomId = res.data.id;
-        setRooms((prev) => [...prev, res.data]);
-      } catch (err) {
-        console.error("Failed to create room:", err);
-        alert("Failed to create room");
-        return;
-      }
+      setCurrentRoomId(existingRoom.id);
+      setRoomName("");
+      return;
     }
 
-    setCurrentRoomId(roomId);
-    setRoomName("");
-
-    // Завантажуємо історію повідомлень для цієї кімнати
+    // Create new room
     try {
-      const res = await axios.get(`${API}/rooms/${roomId}/messages`);
-      setMessages(res.data);
+      const res = await axios.post(`${API}/rooms`, { name: roomName });
+      setCurrentRoomId(res.data.id);
+      setRooms((prev) => [...prev, res.data]);
+      setRoomName("");
     } catch (err) {
-      console.error("Failed to fetch messages:", err);
-      setMessages([]);
+      console.error("Failed to create room:", err);
+      alert("Failed to create room");
     }
   };
 
-  // SSE для нових повідомлень
+  // ---------------------------
+  // Fetch initial messages for the current room
+  // ---------------------------
+  useEffect(() => {
+    if (!currentRoomId) return;
+
+    const fetchMessages = async () => {
+      try {
+        const res = await axios.get(`${API}/rooms/${currentRoomId}/messages`);
+        setMessages(res.data);
+      } catch (err) {
+        console.error("Failed to fetch messages:", err);
+      }
+    };
+
+    fetchMessages();
+  }, [currentRoomId]);
+
+  // ---------------------------
+  // SSE: listen for new messages in real-time
+  // ---------------------------
   useEffect(() => {
     if (!currentRoomId) return;
 
@@ -76,7 +100,7 @@ export function App() {
     eventSource.onmessage = (event) => {
       const parsed = JSON.parse(event.data);
       if (parsed.type === "new-message") {
-        setMessages((prev) => [...prev, parsed.payload]); // додаємо нове повідомлення в кінець
+        setMessages((prev) => [...prev, parsed.payload]);
       }
     };
 
@@ -85,11 +109,16 @@ export function App() {
       eventSource.close();
     };
 
-    return () => eventSource.close();
+    return () => {
+      eventSource.close();
+    };
   }, [currentRoomId]);
 
   return (
     <section className="section content">
+      {/* ---------------------------
+          Author Name Input
+          --------------------------- */}
       {!authorName && (
         <section className="section name">
           <input
@@ -104,6 +133,9 @@ export function App() {
         </section>
       )}
 
+      {/* ---------------------------
+          Join or Create Room
+          --------------------------- */}
       {authorName && !currentRoomId && (
         <section className="section room">
           <input
@@ -113,9 +145,10 @@ export function App() {
             onChange={(e) => setRoomName(e.target.value)}
           />
           <button className="button" onClick={joinOrCreateRoom}>
-            Join / Create room
+            Join / Create Room
           </button>
 
+          {/* List of existing rooms */}
           {rooms.length > 0 && (
             <div className="room-list">
               <p>Existing rooms:</p>
@@ -123,10 +156,50 @@ export function App() {
                 {rooms.map((r) => (
                   <li
                     key={r.id}
-                    style={{ cursor: "pointer", color: "blue" }}
-                    onClick={() => setRoomName(r.name)}
+                    style={{ display: "flex", gap: "8px", alignItems: "center" }}
                   >
-                    {r.name}
+                    {/* Click to join room */}
+                    <span
+                      style={{ cursor: "pointer", color: "blue" }}
+                      onClick={() => setCurrentRoomId(r.id)}
+                    >
+                      {r.name}
+                    </span>
+
+                    {/* Rename room */}
+                    <button
+                      onClick={async () => {
+                        const newName = prompt("Enter new room name", r.name);
+                        if (!newName) return;
+                        try {
+                          const res = await axios.patch(`${API}/rooms/${r.id}`, { name: newName });
+                          setRooms((prev) =>
+                            prev.map((room) => (room.id === r.id ? res.data : room))
+                          );
+                        } catch (err) {
+                          console.error("Failed to rename room:", err);
+                        }
+                      }}
+                    >
+                      Rename
+                    </button>
+
+                    {/* Delete room */}
+                    <button
+                      onClick={async () => {
+                        // eslint-disable-next-line no-restricted-globals
+                        if (!confirm("Delete this room?")) return;
+                        try {
+                          await axios.delete(`${API}/rooms/${r.id}`);
+                          setRooms((prev) => prev.filter((room) => room.id !== r.id));
+                          if (currentRoomId === r.id) setCurrentRoomId("");
+                        } catch (err) {
+                          console.error("Failed to delete room:", err);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -135,9 +208,14 @@ export function App() {
         </section>
       )}
 
+      {/* ---------------------------
+          Chat Section
+          --------------------------- */}
       {authorName && currentRoomId && (
         <>
-          <h1 className="title">Chat: {rooms.find((r) => r.id === currentRoomId)?.name}</h1>
+          <h1 className="title">
+            Chat: {rooms.find((r) => r.id === currentRoomId)?.name || "Unknown"}
+          </h1>
           <MessageForm authorName={authorName} roomId={currentRoomId} />
           <MessageList messages={messages} />
         </>
