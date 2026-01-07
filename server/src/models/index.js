@@ -1,5 +1,5 @@
 import { Room } from './room.model.js';
-import { Message } from './message.model.js';
+import { Message } from './messages.model.js';
 
 // associations
 Room.hasMany(Message, {

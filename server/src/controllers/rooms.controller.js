@@ -7,15 +7,16 @@ const getAll = async (req, res) => {
 };
 
 const create = async (req, res) => {
-  const { name } = req.body;
+  try {
+    const { name } = req.body;
+    if (!name) return res.sendStatus(400);
 
-  if (!name) {
-    return res.sendStatus(400);
+    const newRoom = await roomService.create({ name });
+    res.status(201).json(newRoom);
+  } catch (e) {
+    console.error('ROOM CREATE ERROR:', e); // 👈
+    res.sendStatus(500);
   }
-
-  const newRoom = await roomService.create({ name });
-
-  res.status(201).json(newRoom);
 };
 
 const edit = async (req, res) => {

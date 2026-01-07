@@ -1,4 +1,4 @@
-import { DataTypes } from 'sequelize';
+import { DataTypes, UUIDV4 } from 'sequelize';
 import { client } from '../utils/db.js';
 
 export const Message = client.define(
@@ -8,6 +8,12 @@ export const Message = client.define(
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
+    },
+
+    roomId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      defaultValue: UUIDV4,
     },
 
     author: {

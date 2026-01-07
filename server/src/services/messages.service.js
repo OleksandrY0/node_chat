@@ -3,12 +3,16 @@ import { Message } from '../models/messages.model.js';
 
 const getAllByRoom = async (roomId) => {
   const room = await Room.findByPk(roomId);
+
   if (!room) return null;
 
   const messages = await Message.findAll({
     where: { roomId },
     order: [['time', 'ASC']],
   });
+
+  console.log("ALL MESSAGES:", messages);
+
 
   return messages;
 };
